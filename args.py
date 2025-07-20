@@ -1,5 +1,5 @@
-FFMPEG_PATH = R"D:\0-temp\ffmpeg\ffmpeg.exe"
-FFPROBE_PATH = R"D:\0-temp\ffmpeg\ffprobe.exe"
+FFMPEG_PATH = "ffmpeg"
+FFPROBE_PATH = "ffprobe"
 
 VMAF_N_THREADS = 4  # n_threads passed to libvmaf
 VMAF_SAMPLE_FRAMES = 1000  # number of frames to sample
@@ -10,8 +10,24 @@ class EncodeArgs:
     def __init__(self, encoder: str, ext_name: str, params: dict[str, str]) -> None:
         self.encoder: str = encoder
         self.ext_name: str = ext_name
-        self.codec_params: dict[str, str] = params
+        self.codec_params: dict[str, str] = {**CODEC_GLOBAL_ARGS, **params}
 
+
+GLOBAL_ARGS: list[str] = [
+    "-hide_banner"
+]
+
+CODEC_GLOBAL_ARGS: dict[str, str] = {
+    "map": "0",
+    "map_metadata": "0",
+    "map_chapters": "0",
+    "c:a": "copy",
+    "c:s": "copy",
+}
+
+DECODE_GLOBAL_ARGS: dict[str, str] = {
+    "hwaccel": "cuda",
+}
 
 ARGS: dict[str, EncodeArgs] = {
     "av1_nvenc": EncodeArgs(
@@ -20,9 +36,9 @@ ARGS: dict[str, EncodeArgs] = {
             "c:v": "av1_nvenc",
             "multipass": "fullres",
             "rc": "vbr",
-            "cq": "32",
-            "b:v": "2M",
-            "maxrate": "5M",
+            # "cq": "32",
+            "b:v": "3M",
+            "maxrate": "6M",
             "bufsize": "20M",
             "preset": "p7",
             "profile:v": "main10",
@@ -33,10 +49,10 @@ ARGS: dict[str, EncodeArgs] = {
         {
             "c:v": "hevc_nvenc",
             "multipass": "fullres",
-            "rc": "vbr_hq",
+            # "rc": "vbr_hq",
             "cq": "28",
-            "b:v": "2M",
-            "maxrate": "5M",
+            # "b:v": "2M",
+            # "maxrate": "5M",
             "bufsize": "20M",
             "preset": "p7",
             "profile:v": "main10",
@@ -47,10 +63,10 @@ ARGS: dict[str, EncodeArgs] = {
         {
             "c:v": "h264_nvenc",
             "multipass": "fullres",
-            "rc": "vbr_hq",
+            # "rc": "vbr_hq",
             "cq": "23",
-            "b:v": "2M",
-            "maxrate": "5M",
+            # "b:v": "2M",
+            # "maxrate": "5M",
             "bufsize": "20M",
             "preset": "p7",
             "profile:v": "high",

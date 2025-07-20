@@ -11,7 +11,7 @@ def _get_thread_prefix() -> str:
     return f"[{thread_name}] "
 
 
-def log_error(message: str) -> None:
+def error(message: str) -> None:
     """Log an error message to stderr."""
     with _log_lock:
         prefix = _get_thread_prefix()
@@ -20,7 +20,7 @@ def log_error(message: str) -> None:
         print("", file=sys.stderr)
 
 
-def log_warning(message: str) -> None:
+def warning(message: str) -> None:
     """Log a warning message to stderr."""
     with _log_lock:
         prefix = _get_thread_prefix()
@@ -29,16 +29,16 @@ def log_warning(message: str) -> None:
         print("", file=sys.stderr)
 
 
-def log_success(message: str) -> None:
+def success(message: str) -> None:
     """Log a success message to stdout."""
     with _log_lock:
         prefix = _get_thread_prefix()
-        print(f"\033[32m{prefix}[SUCCESS]\033[0m ", end="")
+        print(f"\033[32m{prefix}[INFO]\033[0m ", end="")
         print(message)
         print("")
 
 
-def log_info(message: str) -> None:
+def info(message: str) -> None:
     """Log an informational message to stdout."""
     with _log_lock:
         prefix = _get_thread_prefix()
@@ -47,7 +47,7 @@ def log_info(message: str) -> None:
         print("")
 
 
-def log_debug(message: str) -> None:
+def debug(message: str) -> None:
     """Log a debug message to stdout."""
     with _log_lock:
         prefix = _get_thread_prefix()
@@ -57,8 +57,8 @@ def log_debug(message: str) -> None:
 
 
 if __name__ == "__main__":
-    log_error("This is an error message.")
-    log_warning("This is a warning message.")
-    log_success("This is a success message.")
-    log_info("This is an informational message.")
-    log_debug("This is a debug message.")
+    error("This is an error message.")
+    warning("This is a warning message.")
+    success("This is a success message.")
+    info("This is an informational message.")
+    debug("This is a debug message.")

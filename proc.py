@@ -4,10 +4,7 @@ import json
 import hashlib
 import console_log as log
 from args import *
-
-GLOBAL_ARGS = [
-    '-hide_banner'
-]
+import subprocess
 
 
 def _format_size(bytes_size, lower_case: bool = False):
@@ -30,6 +27,11 @@ def _delete_file(file_path: Path) -> None:
             file_path.unlink()
         except Exception as e:
             pass
+
+
+def _hash_str(seed: str) -> str:
+    """Generate a random file name using SHA-256 hash."""
+    return hashlib.sha256(seed.encode('utf-8')).hexdigest()[:16]
 
 
 class TranscodeTask:
@@ -150,13 +152,12 @@ class TranscodeTask:
             self.init_values(self.input_file, self.output_file, failed=False)
 
         ffmpeg_codec_options = args.codec_params
-        log.log_debug(f"转码参数: {ffmpeg_codec_options}")
 
         try:
-            stream = ffmpeg.input(str(self.input_file))
+            stream = ffmpeg.input(str(self.input_file), **DECODE_GLOBAL_ARGS)
             stream = ffmpeg.output(stream, str(self.output_file), **ffmpeg_codec_options).global_args(*GLOBAL_ARGS)
 
-            log.log_debug(f"执行命令 (转码): ffmpeg {' '.join(stream.get_args())}")
+            log.debug(f"执行命令 (转码): ffmpeg {' '.join(stream.get_args())}")
             stream.run(cmd=FFMPEG_PATH, quiet=True, overwrite_output=True, capture_stderr=True)
 
             self.isDone = True
@@ -164,9 +165,9 @@ class TranscodeTask:
             return True
         except ffmpeg.Error as e:
             error_message = e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)
-            log.log_error(f"转码失败: {error_message}")
+            log.error(f"转码失败: {error_message}")
         except Exception as e:
-            log.log_error(f"转码时发生意外错误: {str(e)}")
+            log.error(f"转码时发生意外错误: {str(e)}")
 
         self.mark_failed()
         _delete_file(self.output_file)
@@ -179,20 +180,20 @@ class TranscodeTask:
         if not self.frames_count:
             self.get_frames_count()
         if not self.frames_count:  # Ensure frames_count is available
-            log.log_warning(f"无法获取 {self.input_file.name} 的帧数，跳过 VMAF 计算。")
+            log.warning(f"无法获取 {self.input_file.name} 的帧数, 跳过 VMAF 计算。")
             return None
 
         if self.vmaf_mean is not None:  # Already calculated
             return self.vmaf_mean
 
-        vmaf_log_path = log_dir / f"{hashlib.sha256(self.output_file.stem.encode('utf-8')).hexdigest()[:16]}_vmaf.json"
+        vmaf_log_path = log_dir / f"{_hash_str(self.output_file.stem)}_vmaf.json"
         try:
             log_dir.mkdir(parents=True, exist_ok=True)
 
             n_subsample_val = max(self.frames_count // VMAF_SAMPLE_FRAMES, 1)
 
-            distorted = ffmpeg.input(str(self.output_file))
-            original = ffmpeg.input(str(self.input_file))
+            distorted = ffmpeg.input(str(self.output_file), **DECODE_GLOBAL_ARGS)
+            original = ffmpeg.input(str(self.input_file), **DECODE_GLOBAL_ARGS)
 
             vmaf_filter_args = {
                 'log_fmt': 'json',
@@ -207,13 +208,13 @@ class TranscodeTask:
                 **vmaf_filter_args
             )
 
-            log.log_debug(f"执行命令 (VMAF): ffmpeg {' '.join(ffmpeg.output(stream, '-', format='null').get_args())}")
+            log.debug(f"执行命令 (VMAF): ffmpeg {' '.join(ffmpeg.output(stream, '-', format='null').get_args())}")
             (ffmpeg.output(stream, '-', format='null')
              .global_args(*GLOBAL_ARGS)
              .run(cmd=FFMPEG_PATH, quiet=True, capture_stderr=True))
 
             if not vmaf_log_path.exists():
-                log.log_error(f"VMAF 日志文件 {vmaf_log_path} 未创建。")
+                log.error(f"VMAF 日志文件 {vmaf_log_path} 未创建。")
                 return None
 
             with open(vmaf_log_path, "r", encoding="utf-8") as f:
@@ -223,13 +224,13 @@ class TranscodeTask:
                 for key in ["min", "max", "mean", "harmonic_mean"]:
                     value = vmaf_dict.get(key)
                     if value is None:
-                        log.log_warning(f"VMAF 日志缺少字段: {key}")
+                        log.warning(f"VMAF 日志缺少字段: {key}")
                         ret[key] = None
                     else:
                         try:
                             ret[key] = float(value)
                         except ValueError:
-                            log.log_warning(f"VMAF 字段 {key} 不是数字: {value}")
+                            log.warning(f"VMAF 字段 {key} 不是数字: {value}")
                             ret[key] = None
                 self.vmaf_min = ret.get("min")
                 self.vmaf_max = ret.get("max")
@@ -239,21 +240,19 @@ class TranscodeTask:
 
         except ffmpeg.Error as e:
             error_message = e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)
-            log.log_error(f"{self.input_file.name} VMAF 对比失败 - {error_message[:200]}")
+            log.error(f"{self.input_file.name} VMAF 对比失败 - {error_message[:200]}")
             return None
         except json.JSONDecodeError as e:
-            log.log_error(f"解析 VMAF 日志失败 ({vmaf_log_path}): {str(e)}")
+            log.error(f"解析 VMAF 日志失败 ({vmaf_log_path}): {str(e)}")
             return None
         except Exception as e:
-            log.log_error(f"VMAF 计算时发生意外错误: {str(e)}")
+            log.error(f"VMAF 计算时发生意外错误: {str(e)}")
             return None
         finally:
             _delete_file(vmaf_log_path)
 
     def get_duration(self) -> tuple[float | None, float | None]:
         """Get the duration of the original and output video files."""
-        if self.orig_duration is not None and self.dist_duration is not None:
-            return self.orig_duration, self.dist_duration
 
         def _fetch_duration(path: Path) -> float | None:
             try:
@@ -261,23 +260,25 @@ class TranscodeTask:
                 duration_str = probe.get('format', {}).get('duration')
                 if duration_str:
                     return float(duration_str)
-                log.log_warning(f"无法从 {path.name} 获取时长信息。")
+                log.warning(f"无法从 {path.name} 获取时长信息。")
             except ffmpeg.Error as e:
                 error_message = e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)
-                log.log_error(f"获取视频时长失败 ({path.name}): {error_message}")
+                log.error(f"获取视频时长失败 ({path.name}): {error_message}")
             except ValueError:
-                log.log_error(f"视频时长格式无效 ({path.name})")
+                log.error(f"视频时长格式无效 ({path.name})")
             except Exception as e:
-                log.log_error(f"获取视频时长时发生意外错误 ({path.name}): {str(e)}")
+                log.error(f"获取视频时长时发生意外错误 ({path.name}): {str(e)}")
             return None
 
+        if self.orig_duration is not None and self.dist_duration is not None:
+            return self.orig_duration, self.dist_duration
         if self.orig_duration is None:
             self.orig_duration = _fetch_duration(self.input_file)
 
         if self.dist_duration is None and self.output_file.exists() and self.isDone and not self.failed:
             self.dist_duration = _fetch_duration(self.output_file)
         elif not self.output_file.exists() and self.isDone and not self.failed:
-            log.log_warning(f"输出文件 {self.output_file.name} 不存在，无法获取时长。")
+            log.warning(f"输出文件 {self.output_file.name} 不存在, 无法获取时长。")
 
         return self.orig_duration, self.dist_duration
 
@@ -311,54 +312,54 @@ class TranscodeTask:
                     self.frames_count = int(nb_frames_str)
                     return self.frames_count
         except (ffmpeg.Error, KeyError, IndexError, AttributeError) as e:
-            log.log_debug(f"ffprobe (nb_frames) for {path_to_probe.name} failed or parse error: {str(e)}")
+            log.debug(f"ffprobe (nb_frames) for {path_to_probe.name} failed or parse error: {str(e)}")
         except Exception as e:  # General exceptions
-            log.log_debug(f"Unexpected error getting nb_frames for {path_to_probe.name}: {str(e)}")
+            log.debug(f"Unexpected error getting nb_frames for {path_to_probe.name}: {str(e)}")
 
         # Method 2: duration * frame_rate
         try:
             if self.orig_duration is None:  # Ensure duration for input_file is available
                 self.get_duration()
             if self.orig_duration is None or self.orig_duration <= 0:
-                log.log_debug(
+                log.debug(
                     f"Cannot calculate frames using duration for {path_to_probe.name}: duration is {self.orig_duration}")
                 return None
 
             probe_rate_data = ffmpeg.probe(str(path_to_probe), cmd=FFPROBE_PATH,
                                            select_streams='v:0', show_entries='stream=r_frame_rate')
             if not probe_rate_data or 'streams' not in probe_rate_data or not probe_rate_data['streams']:
-                log.log_debug(f"ffprobe (r_frame_rate) for {path_to_probe.name} returned no valid streams.")
+                log.debug(f"ffprobe (r_frame_rate) for {path_to_probe.name} returned no valid streams.")
                 return None
 
             r_frame_rate_str = probe_rate_data['streams'][0].get('r_frame_rate')
             if not r_frame_rate_str or not '/' in r_frame_rate_str:
-                log.log_debug(f"Invalid r_frame_rate format for {path_to_probe.name}: {r_frame_rate_str}")
+                log.debug(f"Invalid r_frame_rate format for {path_to_probe.name}: {r_frame_rate_str}")
                 return None
 
             num_str, denom_str = r_frame_rate_str.split('/')
             if not num_str or not denom_str or not num_str.isdigit() or not denom_str.isdigit():
-                log.log_debug(f"Invalid r_frame_rate components for {path_to_probe.name}: {r_frame_rate_str}")
+                log.debug(f"Invalid r_frame_rate components for {path_to_probe.name}: {r_frame_rate_str}")
                 return None
 
             num, denom = int(num_str), int(denom_str)
             if denom <= 0:
-                log.log_debug(f"Invalid r_frame_rate denominator ({denom}) for {path_to_probe.name}")
+                log.debug(f"Invalid r_frame_rate denominator ({denom}) for {path_to_probe.name}")
                 return None
 
             frame_rate = num / denom
             if frame_rate is None or frame_rate <= 0:
-                log.log_debug(f"Invalid frame_rate ({frame_rate}) for {path_to_probe.name}")
+                log.debug(f"Invalid frame_rate ({frame_rate}) for {path_to_probe.name}")
                 return None
 
             self.frames_count = int(self.orig_duration * frame_rate)
             return self.frames_count
 
         except (ffmpeg.Error, KeyError, IndexError, AttributeError, ValueError) as e:
-            log.log_error(f"估算帧数失败 (duration*rate method) for {path_to_probe.name}: {str(e)}")
+            log.error(f"估算帧数失败 (duration*rate method) for {path_to_probe.name}: {str(e)}")
         except Exception as e:  # General exceptions
-            log.log_error(f"估算帧数失败 (duration*rate method) for {path_to_probe.name}: {str(e)}")
+            log.error(f"估算帧数失败 (duration*rate method) for {path_to_probe.name}: {str(e)}")
         if self.frames_count is None:
-            log.log_warning(f"无法获取 {path_to_probe.name} 的帧数。")
+            log.warning(f"无法获取 {path_to_probe.name} 的帧数。")
         return self.frames_count
 
 
@@ -367,7 +368,7 @@ DEFAULT_ENCODER = "hevc_nvenc"
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2 or len(sys.argv) > 4:
-        log.log_error("Usage: python proc.py <input_file> [output_file] [encoder]")
+        log.error("Usage: python proc.py <input_file> [output_file] [encoder]")
         sys.exit(1)
 
     input_file = Path(sys.argv[1])
@@ -375,12 +376,12 @@ if __name__ == "__main__":
     task = TranscodeTask(input_file, output_file)
     args = ARGS.get(sys.argv[3]) if len(sys.argv) > 3 else ARGS.get(DEFAULT_ENCODER)
     if not args:
-        log.log_error(f"Unknown encoder: {sys.argv[3] if len(sys.argv) > 3 else DEFAULT_ENCODER}")
+        log.error(f"Unknown encoder: {sys.argv[3] if len(sys.argv) > 3 else DEFAULT_ENCODER}")
         sys.exit(1)
     output_file = output_file.with_suffix(args.ext_name)
-    log.log_info(f"Transcoding {input_file.name} to {output_file.name} using {args.encoder}...")
+    log.info(f"Transcoding {input_file.name} to {output_file.name} using {args.encoder}...")
     if not task.transcode(args):
-        log.log_error(f"Transcoding failed for {input_file.name}.")
+        log.error(f"Transcoding failed for {input_file.name}.")
         sys.exit(1)
     task.get_duration()
     task.get_bitrate()
@@ -388,4 +389,4 @@ if __name__ == "__main__":
     task.get_compression_rate()
     status = task.to_status()
     if status:
-        log.log_success(status)
+        log.success(status)

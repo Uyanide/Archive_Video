@@ -60,10 +60,10 @@ ENABLE_VMAF = True
 def transcode_worker(input_file: Path, output_path: Path, tasks: queue.Queue[TranscodeTask | None], transcode_finished: threading.Event) -> None:
     for index, (encoder, encode_args) in enumerate(ARGS.items(), 1):
         output_file = output_path / f"{input_file.stem}_{encode_args.encoder}{encode_args.ext_name}"
-        log.log_info(f"正在处理 ({index}/{len(ARGS)}): {input_file} -> {output_file}")
+        log.info(f"正在处理 ({index}/{len(ARGS)}): {input_file} -> {output_file}")
         task = TranscodeTask(input_file, output_file)
         if not task.transcode(encode_args):
-            log.log_error(f"转码失败: {input_file.name}")
+            log.error(f"转码失败: {input_file.name}")
             tasks.put(task)
             continue
         task.get_compression_rate()
@@ -71,9 +71,9 @@ def transcode_worker(input_file: Path, output_path: Path, tasks: queue.Queue[Tra
         task.get_bitrate()
         res_status = task.to_status()
         if res_status:
-            log.log_success(res_status)
+            log.success(res_status)
         tasks.put(task)
-    log.log_info(f"所有视频转码任务已提交，等待评估结果...")
+    log.info(f"所有视频转码任务已提交，等待评估结果...")
     transcode_finished.set()
     tasks.put(None)
 
@@ -87,11 +87,11 @@ def evaluate_worker(tasks: queue.Queue[TranscodeTask], results: list[TranscodeTa
                 tasks.task_done()
                 break
             if not task.failed and enable_vmaf:
-                log.log_info(f"正在评估 VMAF: {task.input_file.name} (队列中剩余 {tasks.qsize()})")
+                log.info(f"正在评估 VMAF: {task.input_file.name} (队列中剩余 {tasks.qsize()})")
                 if task.get_vmaf_score(log_path.parent) is not None:
                     res_status = task.to_status()
                     if res_status:
-                        log.log_success(res_status)
+                        log.success(res_status)
 
             log_file.write(task.to_csv() + "\n")
             log_file.flush()
@@ -136,7 +136,7 @@ def main(input_file: str, output_dir: str = OUTPUT_DIR, enable_vmaf: bool = ENAB
     transcode_thread.join()
     evaluate_thread.join()
 
-    log.log_success(f"所有视频处理完成，结果已保存为 {output_path / OUTPUT_RESULT_NAME}")
+    log.success(f"所有视频处理完成，结果已保存为 {output_path / OUTPUT_RESULT_NAME}")
     print_results(results)
 
 
@@ -150,5 +150,5 @@ if __name__ == "__main__":
         else:
             print("用法: python transcode.py <输入文件> [输出目录]")
     except KeyboardInterrupt:
-        log.log_error("用户中断")
+        log.error("用户中断")
         sys.exit(130)
